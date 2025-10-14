@@ -1,0 +1,19 @@
+{
+  "name": "API-Calendar-WH",
+  "version": "1.0.0",
+  "type": "module",
+  "main": "auth.js",
+  "scripts": {
+    "start": "nodemon auth.js"
+  },
+  "dependencies": {
+    "axios": "^1.12.2",
+    "body-parser": "^2.2.0",
+    "dotenv": "^17.2.3",
+    "express": "^5.1.0",
+    "googleapis": "^161.0.0",
+    "pg": "^8.16.3",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1"
+  }
+}
