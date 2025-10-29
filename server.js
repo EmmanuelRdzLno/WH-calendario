@@ -38,18 +38,11 @@ app.use('/api-calendar', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
 /**
  * @openapi
  * /webhook/google-calendar:
- *   post:
+ *   get:
  *     summary: Recibe notificaciones del webhook de Google Calendar
  *     description: Endpoint que Google llama cuando hay un cambio en el calendario.
  *     tags:
  *       - Webhook
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             example: {}
  *     responses:
  *       200:
  *         description: Notificación procesada correctamente con eventos actualizados
@@ -65,15 +58,13 @@ app.use('/api-calendar', swaggerUi.serve, swaggerUi.setup(swaggerDocs));
  *       500:
  *         description: Error procesando la notificación
  */
-app.post('/webhook/google-calendar', async (req, res) => {
-  console.log('📩 Notificación recibida de Google Calendar:', req.headers);
+app.get('/webhook/google-calendar', async (req, res) => {
+  console.log('📩 Notificación GET recibida de Google Calendar:', req.headers);
 
   try {
     const accessToken = await oauth2Client.getAccessToken();
     oauth2Client.setCredentials({ access_token: accessToken.token });
 
-    // 🔹 Obtener último sync_token desde la API externa
-    console.log(endpoint);
     let lastSyncToken = null;
     try {
       const tokenRes = await axios.post(
@@ -116,7 +107,6 @@ app.post('/webhook/google-calendar', async (req, res) => {
       ? { message: `Se actualizaron ${updatedEvents.length} evento(s)`, updatedEvents }
       : { message: 'No hay eventos actualizados', updatedEvents: [] };
 
-    // 🔹 Actualizar sync_token usando UPSERT vía API externa
     if (response.data.nextSyncToken) {
       const safeToken = response.data.nextSyncToken.replace(/'/g, "''");
 
@@ -136,12 +126,10 @@ app.post('/webhook/google-calendar', async (req, res) => {
       }
     }
 
-    // 🔔 Enviar JSON al endpoint externo con timeout y manejo de errores
     try {
-      //console.log('🔹 Enviando JSON al endpoint externo:', swaggerResponse);
       await axios.post(process.env.EXTERNAL_ENDPOINT_URL, swaggerResponse, {
         headers: { 'Content-Type': 'application/json' },
-        timeout: 10000, // 10 segundos
+        timeout: 10000,
       });
       console.log(`✅ JSON enviado a ${process.env.EXTERNAL_ENDPOINT_URL}`);
     } catch (err) {
@@ -154,6 +142,7 @@ app.post('/webhook/google-calendar', async (req, res) => {
     res.status(500).json({ error: 'Error procesando la notificación', details: error.message });
   }
 });
+
 
 
 // 🧱 Inicializar el servidor
