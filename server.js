@@ -140,18 +140,38 @@ app.post('/webhook/google-calendar', async (req, res) => {
 // ⚡ Crear canal de notificaciones al iniciar
 const createWatchChannel = async () => {
   try {
-    const uniqueId = 'canal-' + Date.now(); // Genera un ID único
+    // 🔹 Verificar si ya existe un canal activo en tu DB
+    const tokenRes = await axios.post(process.env.ENDPOINT_POSTGRES, {
+      query: 'SELECT * FROM google_channels WHERE active = true LIMIT 1;'
+    });
+
+    if (tokenRes.data.rows.length > 0) {
+      console.log('🔔 Ya existe un canal activo, no se crea uno nuevo');
+      return;
+    }
+
+    // 🔹 Crear un canal nuevo
+    const uniqueId = 'canal-' + Date.now();
     const res = await calendar.events.watch({
       calendarId: 'primary',
       requestBody: {
         id: uniqueId,
         type: 'web_hook',
         address: process.env.WEBHOOK_URL,
-        token: 'opcional-token'
+        token: 'token-seguro'
       }
     });
-    console.log('📡 Canal de notificaciones creado en:', process.env.WEBHOOK_URL);
-    console.log('Datos del canal:', res.data);
+
+    console.log('📡 Canal de notificaciones creado:', res.data);
+
+    // 🔹 Guardar canal en DB
+    await axios.post(process.env.ENDPOINT_POSTGRES, {
+      query: `
+        INSERT INTO google_channels (id, resource_id, expiration, active)
+        VALUES ('${res.data.id}', '${res.data.resourceId}', '${res.data.expiration}', true)
+      `
+    });
+
   } catch (err) {
     console.error('❌ Error creando canal de notificaciones:', err.message);
   }
