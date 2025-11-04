@@ -13,8 +13,6 @@ const oauth2Client = new google.auth.OAuth2(
 oauth2Client.setCredentials({ refresh_token: process.env.GOOGLE_REFRESH_TOKEN });
 
 const calendar = google.calendar({ version: 'v3', auth: oauth2Client });
-
-// 📦 Endpoint para guardar canal en la base de datos
 const endpoint = process.env.ENDPOINT_POSTGRES;
 
 (async () => {
@@ -37,25 +35,23 @@ const endpoint = process.env.ENDPOINT_POSTGRES;
     console.log('✅ Canal creado exitosamente:');
     console.log(channelData);
 
-    // 🧠 Guardar canal en base de datos
-    const safeChannelId = channelData.id.replace(/'/g, "''");
+    const safeId = channelData.id.replace(/'/g, "''");
     const safeResourceId = channelData.resourceId?.replace(/'/g, "''") || null;
+    const expiration = channelData.expiration ? `'${channelData.expiration}'` : 'NULL';
 
+    // 🧠 Desactivar canales anteriores y guardar el nuevo canal como activo
     const query = `
-      INSERT INTO google_channels (id, channel_id, resource_id, expiration)
-      VALUES ('current', '${safeChannelId}', '${safeResourceId}', '${channelData.expiration || null}')
-      ON CONFLICT (id)
-      DO UPDATE SET 
-        channel_id = EXCLUDED.channel_id,
-        resource_id = EXCLUDED.resource_id,
-        expiration = EXCLUDED.expiration;
+      UPDATE google_channels SET active = false;
+      INSERT INTO google_channels (id, resource_id, expiration, active, created_at, updated_at)
+      VALUES ('${safeId}', '${safeResourceId}', ${expiration}, true, NOW(), NOW());
     `;
 
     await axios.post(endpoint, { query });
-    console.log('💾 Canal guardado en la base de datos');
+    console.log('💾 Canal guardado en la base de datos como activo');
 
-    console.log('🆔 channel_id:', safeChannelId);
-    console.log('🔗 resource_id:', safeResourceId);
+    console.log('🆔 Canal ID:', safeId);
+    console.log('🔗 Resource ID:', safeResourceId);
+    console.log('⏰ Expiration:', channelData.expiration || 'N/A');
 
   } catch (err) {
     console.error('❌ Error creando o guardando el canal:', err.message);
