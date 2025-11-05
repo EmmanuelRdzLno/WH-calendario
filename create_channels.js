@@ -26,7 +26,7 @@ const endpoint = process.env.ENDPOINT_POSTGRES;
       requestBody: {
         id: uniqueId,
         type: 'web_hook',
-        address: process.env.WEBHOOK_URL, // URL pública de tu webhook
+        address: process.env.URL_NOTIFICACIONES_CALENDAR, // URL pública de tu webhook
         token: 'optional-token',
       },
     });

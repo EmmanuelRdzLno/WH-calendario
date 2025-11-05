@@ -66,39 +66,55 @@ app.post('/webhook/google-calendar', async (req, res) => {
   const incomingChannelId = req.headers['x-goog-channel-id'];
   const resourceId = req.headers['x-goog-resource-id'];
 
-  // 🧾 Guardar en array todos los webhooks que llegan
+  // 🧾 Registrar todos los webhooks recibidos
   allWebhooks.push({
     timestamp: new Date().toISOString(),
     channelId: incomingChannelId,
-    resourceId: resourceId || null
+    resourceId: resourceId || null,
   });
 
   console.log('📩 Webhook recibido:', { incomingChannelId, resourceId });
-  console.log('🗂️ Total webhooks recibidos:', allWebhooks.length);
-
-  // ✅ Solo ejecutar lógica si el ID del canal coincide con el actual
-  if (incomingChannelId !== VALID_CHANNEL_ID) {
-    console.warn('⚠️ Webhook ignorado: canal no válido');
-    return res.status(403).json({ message: 'Canal no válido', channelId: incomingChannelId });
-  }
-
-  // Guardar también en array de los válidos
-  currentChannelWebhooks.push({
-    timestamp: new Date().toISOString(),
-    channelId: incomingChannelId,
-    resourceId: resourceId || null
-  });
-  console.log('✅ Webhook válido registrado. Total válidos:', currentChannelWebhooks.length);
 
   try {
+    // 🔎 Consultar canal activo desde la base de datos
+    const dbRes = await axios.post(endpoint, {
+      query: "SELECT id FROM google_channels WHERE active = true LIMIT 1;",
+    });
+
+    const activeChannelId = dbRes.data.rows?.[0]?.id || null;
+
+    if (!activeChannelId) {
+      console.warn('⚠️ No hay canal activo en la base de datos.');
+      return res.status(200).send('Sin canal activo en DB');
+    }
+
+    // 🔍 Comparar canales
+    if (incomingChannelId !== activeChannelId) {
+      console.log('🚫 El nombre del canal no coincide con el de la base de datos');
+      console.log(`📤 Canal recibido: ${incomingChannelId}`);
+      console.log(`📦 Canal activo en DB: ${activeChannelId}`);
+      return res.status(200).send('Canal no coincide');
+    }
+
+    // ✅ Si coincide, continuar con la lógica
+    console.log('✅ El canal coincide con el de la base de datos');
+    console.log(`🎯 Canal válido: ${activeChannelId}`);
+
+    // Registrar en array de válidos
+    currentChannelWebhooks.push({
+      timestamp: new Date().toISOString(),
+      channelId: incomingChannelId,
+      resourceId: resourceId || null,
+    });
+
     const accessToken = await oauth2Client.getAccessToken();
     oauth2Client.setCredentials({ access_token: accessToken.token });
 
-    // Obtener último sync_token
+    // 🔁 Obtener sync_token
     let lastSyncToken = null;
     try {
       const tokenRes = await axios.post(endpoint, {
-        query: 'SELECT * FROM google_sync_tokens LIMIT 1;'
+        query: 'SELECT sync_token FROM google_sync_tokens LIMIT 1;',
       });
       const rows = tokenRes.data.rows;
       if (rows.length > 0) lastSyncToken = rows[0].sync_token;
@@ -106,7 +122,7 @@ app.post('/webhook/google-calendar', async (req, res) => {
       console.error('❌ Error obteniendo sync_token:', err.message);
     }
 
-    // Obtener eventos actualizados
+    // 📅 Obtener eventos actualizados
     let params = lastSyncToken
       ? { calendarId: 'primary', syncToken: lastSyncToken, singleEvents: true }
       : { calendarId: 'primary', showDeleted: true, singleEvents: true, orderBy: 'updated' };
@@ -121,7 +137,7 @@ app.post('/webhook/google-calendar', async (req, res) => {
           calendarId: 'primary',
           showDeleted: true,
           singleEvents: true,
-          orderBy: 'updated'
+          orderBy: 'updated',
         });
       } else throw err;
     }
@@ -132,28 +148,46 @@ app.post('/webhook/google-calendar', async (req, res) => {
         ? { message: `Se actualizaron ${updatedEvents.length} evento(s)`, updatedEvents }
         : { message: 'No hay eventos actualizados', updatedEvents: [] };
 
-    // Actualizar sync_token
-    if (response.data.nextSyncToken) {
-      const safeToken = response.data.nextSyncToken.replace(/'/g, "''");
+    // 🌐 Enviar eventos actualizados a una URL externa (si hay eventos nuevos)
+    if (updatedEvents.length > 0) {
       try {
-        await axios.post(endpoint, {
-          query: `INSERT INTO google_sync_tokens (id, sync_token)
-                  VALUES ('id_token', '${safeToken}')
-                  ON CONFLICT (id)
-                  DO UPDATE SET sync_token = EXCLUDED.sync_token;`
+        const externalUrl = process.env.ENDPOINT_ORQUESTADOR; // define esto en tu .env
+        console.log(`📤 Enviando ${updatedEvents.length} evento(s) a: ${externalUrl}`);
+
+        const responsePost = await axios.post(externalUrl, {
+          events: updatedEvents,
+          channelId: incomingChannelId,
+          timestamp: new Date().toISOString(),
         });
-        console.log('🔁 SyncToken actualizado');
+
+        console.log('✅ Eventos enviados correctamente:', responsePost.status);
       } catch (err) {
-        console.error('❌ Error actualizando sync_token:', err.message);
+        console.error('❌ Error enviando eventos al endpoint externo:', err.message);
       }
+    } else {
+      console.log('ℹ️ No hay eventos nuevos para enviar.');
     }
 
-    res.status(200).json(swaggerResponse);
+    
+    // 💾 Guardar nuevo sync_token
+    if (response.data.nextSyncToken) {
+      const safeToken = response.data.nextSyncToken.replace(/'/g, "''");
+      await axios.post(endpoint, {
+        query: `INSERT INTO google_sync_tokens (id, sync_token)
+                VALUES ('id_token', '${safeToken}')
+                ON CONFLICT (id)
+                DO UPDATE SET sync_token = EXCLUDED.sync_token;`,
+      });
+      console.log('🔁 SyncToken actualizado');
+    }
+
+    return res.status(200).json(swaggerResponse);
   } catch (error) {
-    console.error('❌ Error procesando webhook:', error);
-    res.status(500).json({ error: 'Error procesando webhook', details: error.message });
+    console.error('❌ Error procesando webhook:', error.message);
+    return res.status(500).json({ error: 'Error procesando webhook', details: error.message });
   }
 });
+
 
 // 🧱 Inicializar servidor
 const PORT = process.env.PORT || 3000;
